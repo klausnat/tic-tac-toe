@@ -73,7 +73,7 @@ data GameCmd : (ty : Type) -> GameState -> (ty -> GameState) -> Type where
      DrawGame : GameCmd () (Running 0 pl) (const NotRunning)
     
      Move : (move : Int) -> GameCmd MoveRes  
-                                (Running (S free_pos) pl)
+                                (Running free_pos pl)
                                 (\res => case res of Draw => (Running 0 (nextPlayer pl))
                                                      Won => (Running free_pos (nextPlayer pl))
                                                      Cont => (Running free_pos (nextPlayer pl))
@@ -108,42 +108,39 @@ gameLoop {free_pos} {player} = do ShowState
                                                               Zero => do CrossesWon
                                                                          ShowState
                                                                          Exit
-                                        Cont => case free_pos of 
-                                                        (S k) => do Message "Ok, next"
-                                                                    gameLoop
-                                                        Z => do Message "bad"
-                                                                ?ss
-{-
-tictactoe : GameLoop () NotRunning NotRunning
+                                        Cont => do Message "next"
+                                                   gameLoop
+
+tictactoe : GameLoop () NotRunning (const NotRunning)
 tictactoe = do NewGame EmptyGrid
                gameLoop
 
--}
-{-
+data Game : GameState -> Type where
+     GameStart : Game NotRunning
+     CrossW : Grid -> Game NotRunning
+     CrossL : Grid -> Game NotRunning
+     JustDraw : Grid -> Game NotRunning
+     InProgress : Grid -> (frps : List Int) -> 
+                  (pl : Player) -> Game (Running (length frps) pl)
 
-isValidMove : (str : String) -> Bool
-isValidMove str = if (all isDigit (unpack str)) then True else False
+Show (Game g) where
+  show GameStart = "Starting Game"
+  show (CrossW grid) = "Zeroes won! \n" ++ show grid
+  show (CrossL grid) = "Crosses won! \n" ++ show grid 
+  show (JustDraw grid) = "It's a draw! \n" ++ show grid
+  show (InProgress grid frps pl) = show pl ++ ", please move \n" ++ "free pos-s: \n" ++ 
+                                   show frps ++ "\n" ++ show grid
+  
+data Fuel = Dry | More (Lazy Fuel) 
 
-partial
-readMove : GameState -> IO (Int)
-readMove st@(MkGameState grid pl) = do putStr (show pl ++ ", your move: ")
-                                       inpStr <- getLine
-                                       case isValidMove inpStr of
-                                            True => pure (cast inpStr)
-                                            False => do putStrLn "Invalid input"
-                                                        readMove st
-addMove : Grid -> Int -> Player -> Grid
-addMove (MkGrid xs) move pl = MkGrid (map (recordMove move pl) xs) where
-                                recordMove : Int -> Player -> (Int, Position) -> (Int, Position)
-                                recordMove m p (a,b) = if m /= a then (a,b) 
-                                                       else case p of Cross => (a, X)
-                                                                      Zero => (a, O)
-                                
-processMove : (move : Int) -> GameState -> GameState
-processMove move (MkGameState grid pl) = let newGrid = addMove grid move pl
-                                             newPl = if pl == Cross then Zero
-                                                                    else Cross in
-                                             MkGameState newGrid newPl
+data GameResult : (ty : Type) -> (ty -> GameState) -> Type where
+     OK : (res : ty) -> Game (outstate_fn res) -> GameResult ty outstate_fn
+     OutOfFuel : GameResult ty outstate_fn
+
+ok : (res : ty) -> Game (outstate_fn res) -> IO (GameResult ty outstate_fn)
+ok res st = pure (OK res st)
+
+---------- for GameCmd Move below --------------------------------------
 
 makeVerTriples : List (Int, Position) ->
                  List (Int, Position) -> 
@@ -170,10 +167,12 @@ makeTriples xs
         makeVerTriples (toList threeVert1) (toList threeVert2) (toList threeVert3) ++ 
         makeDiags (toList xs)
 
+data Finished = CrLost | CrWon | Dr
+
 checkTriple : List (List (Int, Position)) -> Maybe Finished
-checkTriple xs = if (any chkCross xs) then Just CrossesWon
-                 else if (any chkZero xs) then Just CrossesLost
-                 else if all chkFreePos xs then Just Draw
+checkTriple xs = if (any chkCross xs) then Just CrWon
+                 else if (any chkZero xs) then Just CrLost
+                 else if all chkFreePos xs then Just Dr
                  else Nothing where
                               chkCross : List (Int, Position) -> Bool
                               chkCross xs = all (\(int,p) => if p == X then True else False) xs
@@ -182,8 +181,90 @@ checkTriple xs = if (any chkCross xs) then Just CrossesWon
                               chkFreePos : List (Int, Position) -> Bool
                               chkFreePos xs = all (\(int,p) => if p /= E then True else False) xs
 
+addMove : Grid -> Int -> Player -> Grid
+addMove (MkGrid xs) move pl = MkGrid (map (recordMove move pl) xs) where
+                                recordMove : Int -> Player -> (Int, Position) -> (Int, Position)
+                                recordMove m p (a,b) = if m /= a then (a,b) 
+                                                       else case p of Cross => (a, X)
+                                                                      Zero => (a, O)
+
 checkGrid : Grid -> Maybe Finished
 checkGrid (MkGrid xs) = checkTriple $ makeTriples xs
+
+isValidMove : (str : String) -> Bool
+isValidMove str = if (all isDigit (unpack str)) then True else False
+
+isElemFreePositions : Int -> List Int -> Bool
+isElemFreePositions x [] = False
+isElemFreePositions x (y :: xs) = case x == y of True => True
+                                                 False => isElemFreePositions x xs
+
+removeElem : (value : Int) -> (xs : List Int) -> List Int
+removeElem a [] = []
+removeElem a (x :: xs) = if a == x then xs else (x :: (removeElem a xs))
+
+---------- for GameCmd Move abowe --------------------------------------
+partial
+runCmd : Fuel -> Game instate -> GameCmd ty instate outstate_fn -> IO (GameResult ty outstate_fn)
+runCmd fuel state (NewGame x) = ok () (InProgress x [1,2,3,4,5,6,7,8,9] _) 
+runCmd fuel (InProgress grid frps Cross) CrossesWon = ok () (CrossW grid)
+runCmd fuel (InProgress grid frps Zero) CrossesLost = ok () (CrossL grid)
+runCmd fuel (InProgress grid [] pl) DrawGame = ok () (JustDraw grid)
+runCmd fuel (InProgress grid frps pl) (Move move) 
+  = do let newGrid = addMove grid move pl
+       case checkGrid newGrid of
+            Just CrLost => ok Won (InProgress newGrid _ (nextPlayer pl))
+            Just CrWon => ok Won (InProgress newGrid _ (nextPlayer pl))
+            Just Dr => ok Draw (InProgress newGrid [] (nextPlayer pl))
+            Nothing => ok Cont (InProgress newGrid _ (nextPlayer pl))
+            
+runCmd fuel state (Pure res) = ok res state
+runCmd fuel state (cmd >>= next) = do OK cmdRes newSt <- runCmd fuel state cmd
+                                          | OutOfFuel => pure OutOfFuel
+                                      runCmd fuel newSt (next cmdRes)    
+runCmd fuel state ShowState = do printLn state
+                                 ok () state
+runCmd fuel state (Message str) = do putStrLn str
+                                     ok () state
+runCmd Dry _ _ = pure OutOfFuel
+
+-- RedMove should check everything, including (isElem inp frps)
+runCmd (More x) st@(InProgress grid frps pl) ReadMove 
+       = do putStr "Move: "
+            inpStr <- getLine
+            case isValidMove inpStr of
+                 True => case isElemFreePositions (cast inpStr) frps of 
+                              True => ok (cast inpStr) st
+                              False =>  do putStrLn "Position already taken \n"
+                                           runCmd x st ReadMove
+                 False => do putStrLn "Invalid input"
+                             runCmd x st ReadMove
+
+partial
+run : Fuel -> Game instate -> GameLoop ty instate outstate_fn -> IO (GameResult ty outstate_fn)
+run Dry _ _ = pure OutOfFuel
+run (More fuel) st (cmd >>= next) = do OK cmdRes newSt <- runCmd fuel st cmd
+                                              | OutOfFuel => pure OutOfFuel
+                                       run fuel newSt (next cmdRes)
+run (More fuel) st Exit = pure (OK () st)
+
+
+%default partial
+forever : Fuel 
+forever = More forever
+
+main : IO ()
+main = do run forever GameStart tictactoe
+          pure ()
+
+{-
+
+                                
+processMove : (move : Int) -> GameState -> GameState
+processMove move (MkGameState grid pl) = let newGrid = addMove grid move pl
+                                             newPl = if pl == Cross then Zero
+                                                                    else Cross in
+                                             MkGameState newGrid newPl
 
 checkFinish : GameState -> Maybe Finished
 checkFinish (MkGameState grid pl) = checkGrid grid 
