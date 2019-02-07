@@ -94,7 +94,7 @@ namespace Loop
        Exit : GameLoop () NotRunning (const NotRunning)
 
 -- crosses go first   
-partial           
+partial
 gameLoop : GameLoop () (Running (S free_pos) player) (const NotRunning)
 gameLoop {free_pos} {player} = do ShowState 
                                   g <- ReadMove
@@ -103,22 +103,22 @@ gameLoop {free_pos} {player} = do ShowState
                                        Draw => case free_pos of Z => do DrawGame
                                                                         ShowState
                                                                         Exit
-                                       Won => case player of Cross => case free_pos of (S Z) => do CrossesLost 
+                                       Won => case player of Cross => case free_pos of (S k) => do CrossesLost 
                                                                                                    ShowState
                                                                                                    Exit
                                                                                        Z => do CrossesLost
                                                                                                ShowState
                                                                                                Exit
-                                                             Zero => case free_pos of (S Z) => do CrossesWon
+                                                             Zero => case free_pos of (S k) => do CrossesWon
                                                                                                   ShowState
                                                                                                   Exit
                                                                                       Z => do CrossesWon
                                                                                               ShowState
                                                                                               Exit
-                                       Cont => case free_pos of (S Z) => do Message "next"
+                                       Cont => case free_pos of (S k) => do Message "next"
                                                                             gameLoop
                                                                 _ => do Message "Smth is wrong! Game Over"
-                                                                        ?ss
+                                                                        ?ssh
 
 partial                                                                                                
 tictactoe : GameLoop () NotRunning (const NotRunning)
