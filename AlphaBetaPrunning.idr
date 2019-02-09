@@ -1,8 +1,6 @@
 import Data.Vect
 import Debug.Trace
 
-%default total
-
 data Position = X | O | E
 
 Eq Position where
@@ -56,9 +54,64 @@ EmptyGrid = MkGrid [(1,E),(2,E),(3,E),
                     (4,E),(5,E),(6,E),
                     (7,E),(8,E),(9,E)]
 
------------------- Minimax below
-data Tree = T Grid (List Tree)
+nextPlayer : Player -> Player
+nextPlayer Cross = Zero 
+nextPlayer Zero = Cross
+------------------------------------
 
+makeVerTriples : List (Int, Position) ->
+                 List (Int, Position) -> 
+                 List  (Int, Position) ->
+                 List (List (Int, Position))
+makeVerTriples [] [] [] = []
+makeVerTriples (x :: xs) (y :: ys) (z :: zs) 
+  = (x :: y :: z :: Nil) :: ( makeVerTriples xs ys zs)
+makeVerTriples _ _ _ = []
+
+makeDiags : List (Int,Position) -> List (List (Int, Position))
+makeDiags xs = (filter check1 xs) :: (filter check2 xs) :: Nil where
+                      check1 : (Int,Position) -> Bool
+                      check1 (num, p) = if (num == 1 || num == 5 || num == 9) then True else False
+                      check2 : (Int,Position) -> Bool
+                      check2 (num, p) = if (num == 3 || num == 5 || num == 7) then True else False
+                      
+ 
+-- makeTriples : Vect 9 (Int, Position) -> List (List (Int, Position))
+makeTriples : List (Int, Position) -> List (List (Int, Position))
+makeTriples xs 
+  = let (threeVert1, six) = splitAt 3 xs
+        (threeVert2, threeVert3) = splitAt 3 six in
+        [toList threeVert1, toList threeVert2, toList threeVert3] ++ 
+        makeVerTriples (toList threeVert1) (toList threeVert2) (toList threeVert3) ++ 
+        makeDiags (toList xs)
+
+data Finished = CrLost | CrWon | Dr
+
+checkTriple : List (List (Int, Position)) -> Maybe Finished
+checkTriple xs = if (any chkCross xs) then Just CrWon
+                 else if (any chkZero xs) then Just CrLost
+                 else if all chkFreePos xs then Just Dr
+                 else Nothing where
+                              chkCross : List (Int, Position) -> Bool
+                              chkCross xs = all (\(int,p) => if p == X then True else False) xs
+                              chkZero : List (Int, Position) -> Bool
+                              chkZero xs = all (\(int,p) => if p == O then True else False) xs
+                              chkFreePos : List (Int, Position) -> Bool
+                              chkFreePos xs = all (\(int,p) => if p /= E then True else False) xs
+
+checkGrid : Grid -> Maybe Finished
+checkGrid (MkGrid xs) = checkTriple $ makeTriples xs
+
+------------------ Minimax below
+-- computer plays for zeroes, human (crosses) go first
+data Tree = T Grid (List Tree)
+data EstimatedTree = ET (Int, Grid) (List EstimatedTree)
+
+partial
+Show Tree where
+  show (T x xs) = "Node: " ++ show x ++ "/n" ++ "--------" ++ "/n" ++ 
+                  (concat $ map show xs) ++ "/n"
+ 
 -- 
 convPlayer : Player -> Position
 convPlayer Cross = X
@@ -82,10 +135,38 @@ delEmptyList (x :: xs) = case length x of Z => delEmptyList xs
 addPlrFreePos : (xs : List (Int, Position)) -> Player -> List (List (Int, Position))
 addPlrFreePos xs plr = delEmptyList $ nub $ map (fillIfEmpty plr xs) xs
 
-mkTree : Grid -> Player -> Tree 
-mkTree (MkGrid xs) player = ?ss
+turnToGrid : List (Int, Position) -> Grid
+turnToGrid xs = MkGrid xs
 
+partial
+mkTree : Player -> Grid -> Tree 
+mkTree player gr@(MkGrid xs) 
+ = T gr (map (mkTree (nextPlayer player)) $ map turnToGrid $ addPlrFreePos xs player)
 
+-- bypass tree function 
+
+getMax : (l : List EstimatedTree) -> (acc : Int) -> Int
+getMax [] acc = acc
+getMax ((ET (a, b) ys) :: xs) acc = case acc >= a of True => getMax xs acc
+                                                     False => getMax xs a
+
+getMin : (l : List EstimatedTree) -> (acc : Int) -> Int
+getMin [] acc = acc
+getMin ((ET (a, b) ys) :: xs) acc = case acc >= a of True => getMin xs a 
+                                                     False => getMin xs acc
+--data Tree = T Grid (List Tree)
+--data EstimatedTree = ET (Int, Grid) (List EstimatedTree)
+
+minimax : Player -> Tree -> EstimatedTree
+minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (100, grid) []
+                                                 Just CrWon => ET (-100, grid) []
+                                                 Just Dr => ET (0, grid) []
+                                                 Nothing => ET (0, grid) [] 
+                                             
+minimax plr (T grid xs) = let lst = map (minimax (nextPlayer plr)) xs in
+                                        case plr of Cross => ET ((getMax lst 0), grid) lst
+                                                    Zero => ET ((getMin lst 0), grid) lst 
+                                                    
 
 
 ----------------- Minimax abowe
@@ -97,9 +178,7 @@ data GameState : Type where
      NotRunning : GameState
      Running : (free_pos : Nat) -> (player : Player) -> GameState
 
-nextPlayer : Player -> Player
-nextPlayer Cross = Zero 
-nextPlayer Zero = Cross
+
 
 -- all possible operations we can run that affect GameState: 
 data GameCmd : (ty : Type) -> GameState -> (ty -> GameState) -> Type where
@@ -191,56 +270,12 @@ ok res st = pure (OK res st)
 
 ---------- for GameCmd Move below --------------------------------------
 
-makeVerTriples : List (Int, Position) ->
-                 List (Int, Position) -> 
-                 List  (Int, Position) ->
-                 List (List (Int, Position))
-makeVerTriples [] [] [] = []
-makeVerTriples (x :: xs) (y :: ys) (z :: zs) 
-  = (x :: y :: z :: Nil) :: ( makeVerTriples xs ys zs)
-makeVerTriples _ _ _ = []
-
-makeDiags : List (Int,Position) -> List (List (Int, Position))
-makeDiags xs = (filter check1 xs) :: (filter check2 xs) :: Nil where
-                      check1 : (Int,Position) -> Bool
-                      check1 (num, p) = if (num == 1 || num == 5 || num == 9) then True else False
-                      check2 : (Int,Position) -> Bool
-                      check2 (num, p) = if (num == 3 || num == 5 || num == 7) then True else False
-                      
- 
--- makeTriples : Vect 9 (Int, Position) -> List (List (Int, Position))
-makeTriples : List (Int, Position) -> List (List (Int, Position))
-makeTriples xs 
-  = let (threeVert1, six) = splitAt 3 xs
-        (threeVert2, threeVert3) = splitAt 3 six in
-        [toList threeVert1, toList threeVert2, toList threeVert3] ++ 
-        makeVerTriples (toList threeVert1) (toList threeVert2) (toList threeVert3) ++ 
-        makeDiags (toList xs)
-
-data Finished = CrLost | CrWon | Dr
-
-checkTriple : List (List (Int, Position)) -> Maybe Finished
-checkTriple xs = if (any chkCross xs) then Just CrWon
-                 else if (any chkZero xs) then Just CrLost
-                 else if all chkFreePos xs then Just Dr
-                 else Nothing where
-                              chkCross : List (Int, Position) -> Bool
-                              chkCross xs = all (\(int,p) => if p == X then True else False) xs
-                              chkZero : List (Int, Position) -> Bool
-                              chkZero xs = all (\(int,p) => if p == O then True else False) xs
-                              chkFreePos : List (Int, Position) -> Bool
-                              chkFreePos xs = all (\(int,p) => if p /= E then True else False) xs
-
 addMove : Grid -> Int -> Player -> Grid
 addMove (MkGrid xs) move pl = MkGrid (map (recordMove move pl) xs) where
                                 recordMove : Int -> Player -> (Int, Position) -> (Int, Position)
                                 recordMove m p (a,b) = if m /= a then (a,b) 
                                                        else case p of Cross => (a, X)
                                                                       Zero => (a, O)
-
-checkGrid : Grid -> Maybe Finished
-checkGrid (MkGrid xs) = checkTriple $ makeTriples xs
-
 isValidMove : (str : String) -> Bool
 isValidMove str = if (all isDigit (unpack str)) then True else False
 
