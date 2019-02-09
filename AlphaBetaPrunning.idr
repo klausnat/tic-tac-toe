@@ -1,5 +1,6 @@
 import Data.Vect
 import Debug.Trace
+%default total
 
 data Position = X | O | E
 
@@ -157,6 +158,7 @@ getMin ((ET (a, b) ys) :: xs) acc = case acc >= a of True => getMin xs a
 --data Tree = T Grid (List Tree)
 --data EstimatedTree = ET (Int, Grid) (List EstimatedTree)
 
+partial
 minimax : Player -> Tree -> EstimatedTree
 minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (100, grid) []
                                                  Just CrWon => ET (-100, grid) []
@@ -166,7 +168,6 @@ minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (100, grid) [
 minimax plr (T grid xs) = let lst = map (minimax (nextPlayer plr)) xs in
                                         case plr of Cross => ET ((getMax lst 0), grid) lst
                                                     Zero => ET ((getMin lst 0), grid) lst 
-                                                    
 
 
 ----------------- Minimax abowe
@@ -189,7 +190,7 @@ data GameCmd : (ty : Type) -> GameState -> (ty -> GameState) -> Type where
      DrawGame : GameCmd () (Running 0 pl) (const NotRunning)
     
      Move : (move : Int) -> GameCmd MoveRes  
-                                (Running (S free_pos) pl)
+                                (Running free_pos pl)
                                 (\res => case res of Draw => (Running free_pos (nextPlayer pl))
                                                      Won => (Running free_pos (nextPlayer pl))
                                                      Cont => (Running free_pos (nextPlayer pl))
@@ -200,7 +201,7 @@ data GameCmd : (ty : Type) -> GameState -> (ty -> GameState) -> Type where
              (GameCmd b st1 st3_fn)
      ShowState : GameCmd () st (const st )
      Message : String -> GameCmd () st (const st)
-     ReadMove : GameCmd Int st (const st)
+     ReadMove : GameCmd Int (Running (S free_pos) pl) (const (Running free_pos pl))
      EmergencyExit : GameCmd () st (const NotRunning)
      
 namespace Loop
@@ -211,6 +212,7 @@ namespace Loop
        Exit : GameLoop () NotRunning (const NotRunning)
 
 -- crosses go first   
+
 partial
 gameLoop : GameLoop () (Running (S free_pos) player) (const NotRunning)
 gameLoop {free_pos} {player} = do ShowState 
@@ -293,14 +295,11 @@ runCmd fuel (InProgress grid frps Zero) CrossesLost = ok () (CrossL grid)
 runCmd fuel (InProgress grid [] pl) DrawGame = ok () (JustDraw grid)
 runCmd fuel st@(InProgress grid frps pl) (Move move) 
   = do let newGrid = addMove grid move pl
-       case isElem move frps of
-                   Yes prf => case checkGrid newGrid of
-                                   Just CrLost => ok Won (InProgress newGrid (removeElem move frps) (nextPlayer pl))
-                                   Just CrWon =>  ok Won (InProgress newGrid (removeElem move frps) (nextPlayer pl))
-                                   Just Dr => ok Draw (InProgress newGrid (removeElem move frps) (nextPlayer pl))
-                                   Nothing => ok Cont (InProgress newGrid (removeElem move frps) (nextPlayer pl))
-                   No contra => do putStr "Position already taken \n"
-                                   ?ii
+       case checkGrid newGrid of Just CrLost => ok Won (InProgress newGrid frps (nextPlayer pl))
+                                 Just CrWon =>  ok Won (InProgress newGrid frps (nextPlayer pl))
+                                 Just Dr => ok Draw (InProgress newGrid frps (nextPlayer pl))
+                                 Nothing => ok Cont (InProgress newGrid frps (nextPlayer pl))
+
 runCmd fuel state (Pure res) = ok res state
 runCmd fuel state (cmd >>= next) = do OK cmdRes newSt <- runCmd fuel state cmd
                                           | OutOfFuel => pure OutOfFuel
@@ -317,7 +316,7 @@ runCmd (More x) st@(InProgress grid frps pl) ReadMove
             inpStr <- getLine
             case isValidMove inpStr of
                  True => case isElem (cast inpStr) frps of 
-                              Yes prf => ok (cast inpStr) st
+                              Yes prf => ok (cast inpStr) (InProgress grid (removeElem (cast inpStr) frps) pl)
                               No contra =>  do putStrLn "Position already taken \n"
                                                runCmd x st ReadMove
                  False => do putStrLn "Invalid input"
