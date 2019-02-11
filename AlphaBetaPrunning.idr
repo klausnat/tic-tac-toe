@@ -309,17 +309,18 @@ compareGrds (MkGrid xs) (MkGrid ys) = compareLists xs ys where
     = if a == c then case b == d of True => compareLists xs ys
                                     False => Just a
                 else Nothing
-                                                                        
+
+mutual
+  makeMoveHelp : Grid -> List EstimatedTree -> (Maybe Int)
+  makeMoveHelp grid [] = Nothing
+  makeMoveHelp grid ((ET x ys) :: xs) = ?ss_1
 
 
-makeMoveHelp : Grid -> List EstimatedTree -> (Maybe Int)
-makeMoveHelp grid xs = ?makeMoveHelp_rhs
-
-
-makeMove : Grid -> (frps : Vect n Int) -> EstimatedTree -> Maybe Int
-makeMove grid frps (ET (estInt, curGrid) listETs) = if grid == curGrid 
-                                                    then (compareGrds grid (getMaxGrid grid listETs))
-                                                    else makeMoveHelp grid listETs
+  makeMove : Grid -> EstimatedTree -> Maybe Int
+  makeMove grid (ET (estInt, curGrid) listETs) 
+    = if grid == curGrid 
+      then (compareGrds grid (getMaxGrid grid listETs))
+      else makeMoveHelp grid listETs
                                                                                  
 
 ---------- for GameCmd Move abowe --------------------------------------
@@ -350,7 +351,7 @@ runCmd Dry _ _ = pure OutOfFuel
 runCmd (More x) st@(InProgress grid frps pl et) ReadMove 
  = if pl == Zero 
    then do putStr "Computer thinking... \n"
-           let (Just move) = makeMove grid frps et
+           let (Just move) = makeMove grid et
                            | Nothing => do putStrLn "Computer is not able to find solution."
                                            runCmd x st ReadMove
            case isElem move frps of
