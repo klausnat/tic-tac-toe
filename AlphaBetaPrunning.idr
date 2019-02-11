@@ -166,9 +166,8 @@ minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (100, grid) [
                                                  Nothing => ET (0, grid) [] 
                                              
 minimax plr (T grid xs) = let lst = map (minimax (nextPlayer plr)) xs in
-                                        case plr of Cross => ET ((getMax lst 0), grid) lst
-                                                    Zero => ET ((getMin lst 0), grid) lst 
-
+                                        case plr of Cross => ET ((getMin lst 0), grid) lst
+                                                    Zero => ET ((getMax lst 0), grid) lst 
 
 ----------------- Minimax abowe
 
@@ -251,15 +250,15 @@ data Game : GameState -> Type where
      CrossL : Grid -> Game NotRunning
      JustDraw : Grid -> Game NotRunning
      InProgress : Grid -> (frps : Vect frp Int) -> 
-                  (pl : Player) -> Game (Running frp pl)
+                  (pl : Player) -> (estTree : EstimatedTree) -> Game (Running frp pl)
 
 Show (Game g) where
   show GameStart = "Starting Game"
   show (CrossW grid) = "Zeroes won! \n" ++ show grid
   show (CrossL grid) = "Crosses won! \n" ++ show grid 
   show (JustDraw grid) = "It's a draw! \n" ++ show grid
-  show (InProgress grid frps pl) = show pl ++ ", please move \n" ++ "free pos-s: \n" ++ 
-                                   show frps ++ "\n" ++ show grid
+  show (InProgress grid frps pl esTr) = show pl ++ ", please move \n" ++ "free pos-s: \n" ++ 
+                                        show frps ++ "\n" ++ show grid
   
 data Fuel = Dry | More (Lazy Fuel) 
 
@@ -286,19 +285,56 @@ removeElem value (value :: ys) {prf = Here} = ys
 removeElem {n = Z} value (y :: []) {prf = There later} = absurd later
 removeElem {n = (S k)} value (y :: ys) {prf = There later} = y :: removeElem value ys
 
+-- data EstimatedTree = ET (Int, Grid) (List EstimatedTree)
+Eq Grid where
+  (==) (MkGrid xs1) (MkGrid xs2) = xs1 == xs2
+
+-- gets max-estimated grid from the given list, just one, just upper layer.
+getMaxGrid : Grid -> (lst : List EstimatedTree) -> Grid
+getMaxGrid gr [] = gr
+getMaxGrid gr ((ET (estInt, curGrid) listEstIntsGrids) :: []) = curGrid
+getMaxGrid gr ((ET (estInt1, gr1) curGridsForGr1) :: ((ET (estInt2, gr2) curGridsForGr2) :: uppLayerOfGrids)) 
+= if estInt1 >= estInt2 
+     then getMaxGrid gr1 uppLayerOfGrids
+     else getMaxGrid gr2 uppLayerOfGrids
+
+-- gives move, which is the difference between initial and selected grid
+compareGrds : (initialGrid : Grid) -> (selectedGrid : Grid) -> Maybe Int
+compareGrds (MkGrid xs) (MkGrid ys) = compareLists xs ys where
+  commpareLists : List (Int, Position) -> List (Int, Position) -> Maybe Int
+  compareLists [] [] = Nothing
+  compareLists [] (x :: xs) = Nothing
+  compareLists (x :: xs) [] = Nothing
+  compareLists ((a, b) :: xs) ((c, d) :: ys)
+    = if a == c then case b == d of True => compareLists xs ys
+                                    False => Just a
+                else Nothing
+                                                                        
+
+
+makeMoveHelp : Grid -> List EstimatedTree -> (Maybe Int)
+makeMoveHelp grid xs = ?makeMoveHelp_rhs
+
+
+makeMove : Grid -> (frps : Vect n Int) -> EstimatedTree -> Maybe Int
+makeMove grid frps (ET (estInt, curGrid) listETs) = if grid == curGrid 
+                                                    then (compareGrds grid (getMaxGrid grid listETs))
+                                                    else makeMoveHelp grid listETs
+                                                                                 
+
 ---------- for GameCmd Move abowe --------------------------------------
 partial
 runCmd : Fuel -> Game instate -> GameCmd ty instate outstate_fn -> IO (GameResult ty outstate_fn)
-runCmd fuel state (NewGame x) = ok () (InProgress x [1,2,3,4,5,6,7,8,9] _) 
-runCmd fuel (InProgress grid frps Cross) CrossesWon = ok () (CrossW grid)
-runCmd fuel (InProgress grid frps Zero) CrossesLost = ok () (CrossL grid)
-runCmd fuel (InProgress grid [] pl) DrawGame = ok () (JustDraw grid)
-runCmd fuel st@(InProgress grid frps pl) (Move move) 
+runCmd fuel state (NewGame x) = ok () (InProgress x [1,2,3,4,5,6,7,8,9] _ (minimax Cross (mkTree Cross x))) 
+runCmd fuel (InProgress grid frps Cross et) CrossesWon = ok () (CrossW grid)
+runCmd fuel (InProgress grid frps Zero et) CrossesLost = ok () (CrossL grid)
+runCmd fuel (InProgress grid [] pl et) DrawGame = ok () (JustDraw grid)
+runCmd fuel st@(InProgress grid frps pl et) (Move move) 
   = do let newGrid = addMove grid move pl
-       case checkGrid newGrid of Just CrLost => ok Won (InProgress newGrid frps (nextPlayer pl))
-                                 Just CrWon =>  ok Won (InProgress newGrid frps (nextPlayer pl))
-                                 Just Dr => ok Draw (InProgress newGrid frps (nextPlayer pl))
-                                 Nothing => ok Cont (InProgress newGrid frps (nextPlayer pl))
+       case checkGrid newGrid of Just CrLost => ok Won (InProgress newGrid frps (nextPlayer pl) et)
+                                 Just CrWon =>  ok Won (InProgress newGrid frps (nextPlayer pl) et)
+                                 Just Dr => ok Draw (InProgress newGrid frps (nextPlayer pl) et)
+                                 Nothing => ok Cont (InProgress newGrid frps (nextPlayer pl) et)
 
 runCmd fuel state (Pure res) = ok res state
 runCmd fuel state (cmd >>= next) = do OK cmdRes newSt <- runCmd fuel state cmd
@@ -311,16 +347,25 @@ runCmd fuel state (Message str) = do putStrLn str
 runCmd Dry _ _ = pure OutOfFuel
 
 -- RedMove should check everything, including (isElem inp frps)
-runCmd (More x) st@(InProgress grid frps pl) ReadMove 
-       = do putStr "Move: "
-            inpStr <- getLine
-            case isValidMove inpStr of
-                 True => case isElem (cast inpStr) frps of 
-                              Yes prf => ok (cast inpStr) (InProgress grid (removeElem (cast inpStr) frps) pl)
-                              No contra =>  do putStrLn "Position already taken \n"
-                                               runCmd x st ReadMove
-                 False => do putStrLn "Invalid input"
-                             runCmd x st ReadMove
+runCmd (More x) st@(InProgress grid frps pl et) ReadMove 
+ = if pl == Zero 
+   then do putStr "Computer thinking... \n"
+           let (Just move) = makeMove grid frps et
+                           | Nothing => do putStrLn "Computer is not able to find solution."
+                                           runCmd x st ReadMove
+           case isElem move frps of
+                Yes prf => ok move (InProgress grid (removeElem move frps) pl et)
+                No contra =>  do putStrLn "Position already taken \n"
+                                 runCmd x st ReadMove
+   else do putStr "Move: "
+           inpStr <- getLine
+           case isValidMove inpStr of
+                  True => case isElem (cast inpStr) frps of 
+                               Yes prf => ok (cast inpStr) (InProgress grid (removeElem (cast inpStr) frps) pl et)
+                               No contra =>  do putStrLn "Position already taken \n"
+                                                runCmd x st ReadMove
+                  False => do putStrLn "Invalid input"
+                              runCmd x st ReadMove
 
 partial
 run : Fuel -> Game instate -> GameLoop ty instate outstate_fn -> IO (GameResult ty outstate_fn)
