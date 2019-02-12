@@ -115,7 +115,14 @@ partial
 Show Tree where
   show (T x xs) = "Node: " ++ show x ++ "/n" ++ "--------" ++ "/n" ++ 
                   (concat $ map show xs) ++ "/n"
- 
+
+partial 
+Show EstimatedTree where
+  show (ET (estimation,grid) xs) = "EstimatedTree (just node) \n estimation:  " 
+                                   ++ show estimation ++ "\n" 
+                                   ++ "grid: \n" ++ show grid ++ "\n"
+                                   ++ "list of furhter trees: " ++ case xs of [] => "empty"
+                                                                              _ => " xs \n"
 -- 
 convPlayer : Player -> Position
 convPlayer Cross = X
@@ -142,6 +149,14 @@ addPlrFreePos xs plr = delEmptyList $ nub $ map (fillIfEmpty plr xs) xs
 turnToGrid : List (Int, Position) -> Grid
 turnToGrid xs = MkGrid xs
 
+---------------------- TESTING INFO below ---------------------
+TestGrid1 : Grid
+TestGrid1 = MkGrid [(1,X),(2,E),(3,E),
+                    (4,E),(5,E),(6,E),
+                    (7,E),(8,E),(9,E)]
+
+---------------------- TESTING INFO abowe ---------------------
+
 partial
 mkTree : Player -> Grid -> Tree 
 mkTree player gr@(MkGrid xs) 
@@ -167,11 +182,20 @@ minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (100, grid) [
                                                  Just CrWon => ET (-100, grid) []
                                                  Just Dr => ET (0, grid) []
                                                  Nothing => ET (0, grid) [] 
+minimax plr (T grid xs) = case checkGrid grid of Just CrLost => ET (100, grid) []
+                                                 Just CrWon => ET (-100, grid) []
+                                                 Just Dr => ET (0, grid) []
+                                                 Nothing => let lst = (map (minimax (nextPlayer plr)) xs) in
+                                                                case plr of Cross => ET ((getMin lst 0), grid) lst
+                                                                            Zero => ET ((getMax lst 0), grid) lst 
 
 -- trace : (msg : String) -> (result : a) -> a                                                                                          
+
+{-
 minimax plr (T grid xs) = let lst = (map (minimax (nextPlayer plr)) xs) in
                                         case plr of Cross => ET ((getMin lst 0), grid) lst
                                                     Zero => ET ((getMax lst 0), grid) lst 
+-}
 
 ----------------- Minimax abowe
 
@@ -341,7 +365,7 @@ makeMove : Grid -> EstimatedTree -> Maybe Int
 makeMove grid estTr 
   = case findRightNode grid estTr 
          of Nothing => Nothing
-            Just (ET (estInt, gr2) smth) => (compareGrds grid (getMaxGrid gr2 smth))
+            Just (ET (estInt, gr2) smth) => (compareGrds grid (getMaxGrid gr2 (trace (show smth) smth)   ))
 
 ---------- for GameCmd Move abowe --------------------------------------
 partial
