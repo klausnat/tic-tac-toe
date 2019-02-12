@@ -46,7 +46,7 @@ showSquare (a,p) = case a of 1 => show p ++ vt
                              6 => show p ++ "\n" ++ "----" ++ "----" ++ "-" ++ "\n"
                              9 => show p
                              _ => "nothing"
-                             
+
 Show Grid where
   show (MkGrid xs) = concat (map showSquare xs)
 
@@ -108,6 +108,9 @@ checkGrid (MkGrid xs) = checkTriple $ makeTriples xs
 data Tree = T Grid (List Tree)
 data EstimatedTree = ET (Int, Grid) (List EstimatedTree)
 
+EmptyEstimatedTree : EstimatedTree
+EmptyEstimatedTree = ET (0,EmptyGrid) []
+
 partial
 Show Tree where
   show (T x xs) = "Node: " ++ show x ++ "/n" ++ "--------" ++ "/n" ++ 
@@ -164,8 +167,9 @@ minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (100, grid) [
                                                  Just CrWon => ET (-100, grid) []
                                                  Just Dr => ET (0, grid) []
                                                  Nothing => ET (0, grid) [] 
-                                             
-minimax plr (T grid xs) = let lst = map (minimax (nextPlayer plr)) xs in
+
+-- trace : (msg : String) -> (result : a) -> a                                                                                          
+minimax plr (T grid xs) = let lst = (map (minimax (nextPlayer plr)) xs) in
                                         case plr of Cross => ET ((getMin lst 0), grid) lst
                                                     Zero => ET ((getMax lst 0), grid) lst 
 
@@ -212,6 +216,7 @@ namespace Loop
 
 -- crosses go first   
 
+-- trace : (msg : String) -> (result : a) -> a
 partial
 gameLoop : GameLoop () (Running (S free_pos) player) (const NotRunning)
 gameLoop {free_pos} {player} = do ShowState 
@@ -239,9 +244,10 @@ gameLoop {free_pos} {player} = do ShowState
                                                                         EmergencyExit
                                                                         Exit
 
+
 partial                                                                                                
 tictactoe : GameLoop () NotRunning (const NotRunning)
-tictactoe = do NewGame EmptyGrid
+tictactoe = do trace "we are at first line of tictactoe function... " (NewGame EmptyGrid)
                gameLoop
 
 data Game : GameState -> Type where
@@ -301,7 +307,7 @@ getMaxGrid gr ((ET (estInt1, gr1) curGridsForGr1) :: ((ET (estInt2, gr2) curGrid
 -- gives move, which is the difference between initial and selected grid
 compareGrds : (initialGrid : Grid) -> (selectedGrid : Grid) -> Maybe Int
 compareGrds (MkGrid xs) (MkGrid ys) = compareLists xs ys where
-  commpareLists : List (Int, Position) -> List (Int, Position) -> Maybe Int
+  compareLists : List (Int, Position) -> List (Int, Position) -> Maybe Int
   compareLists [] [] = Nothing
   compareLists [] (x :: xs) = Nothing
   compareLists (x :: xs) [] = Nothing
@@ -310,32 +316,48 @@ compareGrds (MkGrid xs) (MkGrid ys) = compareLists xs ys where
                                     False => Just a
                 else Nothing
 
-mutual
-  makeMoveHelp : Grid -> List EstimatedTree -> (Maybe Int)
-  makeMoveHelp grid [] = Nothing
-  makeMoveHelp grid ((ET x ys) :: xs) = ?ss_1
+{- 
+   1. bypass EstimatedTree
+   2. find in it current grid
+   3. get list of possible next moves from current grid and find maxOne (getMaxGrid)
+   4. return this move or return Nothing if somewhere we faced problem.
+-}
 
+findET : List (Maybe EstimatedTree) -> Maybe EstimatedTree
+findET [] = Nothing
+findET (x :: xs) = case x of (Just smth) => Just smth
+                             Nothing => findET xs
 
-  makeMove : Grid -> EstimatedTree -> Maybe Int
-  makeMove grid (ET (estInt, curGrid) listETs) 
-    = if grid == curGrid 
-      then (compareGrds grid (getMaxGrid grid listETs))
-      else makeMoveHelp grid listETs
-                                                                                 
+partial
+findRightNode : Grid -> EstimatedTree -> Maybe EstimatedTree
+findRightNode gr et@(ET (estInt, gr1) []) = if gr == gr1 then Just et else Nothing
+findRightNode gr et@(ET (estInt, gr1) xs) 
+  = if gr == gr1 then Just et 
+    else let res = map (findRightNode gr) xs in
+             findET res 
+
+partial
+makeMove : Grid -> EstimatedTree -> Maybe Int
+makeMove grid estTr 
+  = case findRightNode grid estTr 
+         of Nothing => Nothing
+            Just (ET (estInt, gr2) smth) => (compareGrds grid (getMaxGrid gr2 smth))
 
 ---------- for GameCmd Move abowe --------------------------------------
 partial
 runCmd : Fuel -> Game instate -> GameCmd ty instate outstate_fn -> IO (GameResult ty outstate_fn)
-runCmd fuel state (NewGame x) = ok () (InProgress x [1,2,3,4,5,6,7,8,9] _ (minimax Cross (mkTree Cross x))) 
+runCmd fuel state (NewGame x) = ok () (InProgress x [1,2,3,4,5,6,7,8,9] _ EmptyEstimatedTree) 
 runCmd fuel (InProgress grid frps Cross et) CrossesWon = ok () (CrossW grid)
 runCmd fuel (InProgress grid frps Zero et) CrossesLost = ok () (CrossL grid)
 runCmd fuel (InProgress grid [] pl et) DrawGame = ok () (JustDraw grid)
 runCmd fuel st@(InProgress grid frps pl et) (Move move) 
   = do let newGrid = addMove grid move pl
-       case checkGrid newGrid of Just CrLost => ok Won (InProgress newGrid frps (nextPlayer pl) et)
-                                 Just CrWon =>  ok Won (InProgress newGrid frps (nextPlayer pl) et)
-                                 Just Dr => ok Draw (InProgress newGrid frps (nextPlayer pl) et)
-                                 Nothing => ok Cont (InProgress newGrid frps (nextPlayer pl) et)
+       let newEstimatedTree = if grid == EmptyGrid then minimax (nextPlayer pl) (mkTree (nextPlayer pl) newGrid) 
+                                                   else et
+       case checkGrid newGrid of Just CrLost => ok Won (InProgress newGrid frps (nextPlayer pl) newEstimatedTree)
+                                 Just CrWon =>  ok Won (InProgress newGrid frps (nextPlayer pl) newEstimatedTree)
+                                 Just Dr => ok Draw (InProgress newGrid frps (nextPlayer pl) newEstimatedTree)
+                                 Nothing => ok Cont (InProgress newGrid frps (nextPlayer pl) newEstimatedTree)
 
 runCmd fuel state (Pure res) = ok res state
 runCmd fuel state (cmd >>= next) = do OK cmdRes newSt <- runCmd fuel state cmd
