@@ -178,24 +178,16 @@ getMin ((ET (a, b) ys) :: xs) acc = case acc >= a of True => getMin xs a
 
 partial
 minimax : Player -> Tree -> EstimatedTree
-minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (100, grid) []
-                                                 Just CrWon => ET (-100, grid) []
+minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (1, grid) []
+                                                 Just CrWon => ET (-1, grid) []
                                                  Just Dr => ET (0, grid) []
                                                  Nothing => ET (0, grid) [] 
-minimax plr (T grid xs) = case checkGrid grid of Just CrLost => ET (100, grid) []
-                                                 Just CrWon => ET (-100, grid) []
-                                                 Just Dr => ET (0, grid) []
-                                                 Nothing => let lst = (map (minimax (nextPlayer plr)) xs) in
-                                                                case plr of Cross => ET ((getMin lst 0), grid) lst
-                                                                            Zero => ET ((getMax lst 0), grid) lst 
-
--- trace : (msg : String) -> (result : a) -> a                                                                                          
-
-{-
 minimax plr (T grid xs) = let lst = (map (minimax (nextPlayer plr)) xs) in
-                                        case plr of Cross => ET ((getMin lst 0), grid) lst
-                                                    Zero => ET ((getMax lst 0), grid) lst 
--}
+                                             case plr of Cross => ET ((getMin lst 0), grid) lst
+                                                         Zero => ET ((getMax lst 0), grid) lst 
+
+
+-- trace : (msg : String) -> (result : a) -> a 
 
 ----------------- Minimax abowe
 
@@ -319,14 +311,14 @@ removeElem {n = (S k)} value (y :: ys) {prf = There later} = y :: removeElem val
 Eq Grid where
   (==) (MkGrid xs1) (MkGrid xs2) = xs1 == xs2
 
+partial
 -- gets max-estimated grid from the given list, just one, just upper layer.
-getMaxGrid : Grid -> (lst : List EstimatedTree) -> Grid
-getMaxGrid gr [] = gr
-getMaxGrid gr ((ET (estInt, curGrid) listEstIntsGrids) :: []) = curGrid
-getMaxGrid gr ((ET (estInt1, gr1) curGridsForGr1) :: ((ET (estInt2, gr2) curGridsForGr2) :: uppLayerOfGrids)) 
-= if estInt1 >= estInt2 
-     then getMaxGrid gr1 uppLayerOfGrids
-     else getMaxGrid gr2 uppLayerOfGrids
+getMaxGrid : (lst : List EstimatedTree) -> Maybe Grid
+getMaxGrid [] = Nothing
+getMaxGrid ((ET (int1,gr1) xs1) :: []) = Just gr1
+getMaxGrid ((ET (int2,gr2) xs2) :: ((ET (int3,gr3) xs3) :: rest)) 
+  = if int2 >= int3 then getMaxGrid $ (ET (int2,gr2) xs2) :: rest
+                    else getMaxGrid $ (ET (int3,gr3) xs3) :: rest
 
 -- gives move, which is the difference between initial and selected grid
 compareGrds : (initialGrid : Grid) -> (selectedGrid : Grid) -> Maybe Int
@@ -365,7 +357,8 @@ makeMove : Grid -> EstimatedTree -> Maybe Int
 makeMove grid estTr 
   = case findRightNode grid estTr 
          of Nothing => Nothing
-            Just (ET (estInt, gr2) smth) => (compareGrds grid (getMaxGrid gr2 (trace (show smth) smth)   ))
+            Just (ET (estInt, gr2) smth) => case getMaxGrid smth of Nothing => Nothing
+                                                                    Just grd => compareGrds grid grd
 
 ---------- for GameCmd Move abowe --------------------------------------
 partial
