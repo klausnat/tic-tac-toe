@@ -163,16 +163,17 @@ mkTree player gr@(MkGrid xs)
  = T gr (map (mkTree (nextPlayer player)) $ map turnToGrid $ addPlrFreePos xs player)
 
 -- bypass tree function 
+partial
+getMax : (l : List EstimatedTree) -> Int
+getMax ((ET (a, b) ys) :: []) = a
+getMax ((ET (a, b) ys) :: ((ET (c, d) zs) :: xs)) = if a >= c then getMax ((ET (a,b) ys) :: xs) 
+                                                              else getMax ((ET (c,d) ys) :: xs) 
+partial
+getMin : (l : List EstimatedTree) -> Int
+getMin ((ET (a, b) ys) :: []) = a
+getMin ((ET (a, b) ys) :: ((ET (c, d) zs) :: xs)) = if a <= c then getMin ((ET (a,b) ys) :: xs) 
+                                                              else getMin ((ET (c,d) ys) :: xs) 
 
-getMax : (l : List EstimatedTree) -> (acc : Int) -> Int
-getMax [] acc = acc
-getMax ((ET (a, b) ys) :: xs) acc = case acc >= a of True => getMax xs acc
-                                                     False => getMax xs a
-
-getMin : (l : List EstimatedTree) -> (acc : Int) -> Int
-getMin [] acc = acc
-getMin ((ET (a, b) ys) :: xs) acc = case acc >= a of True => getMin xs a 
-                                                     False => getMin xs acc
 --data Tree = T Grid (List Tree)
 --data EstimatedTree = ET (Int, Grid) (List EstimatedTree)
 
@@ -182,9 +183,14 @@ minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (1, grid) []
                                                  Just CrWon => ET (-1, grid) []
                                                  Just Dr => ET (0, grid) []
                                                  Nothing => ET (0, grid) [] 
-minimax plr (T grid xs) = let lst = (map (minimax (nextPlayer plr)) xs) in
-                                             case plr of Cross => ET ((getMin lst 0), grid) lst
-                                                         Zero => ET ((getMax lst 0), grid) lst 
+minimax plr (T grid xs) = case checkGrid grid of Just CrLost => ET (1, grid) []
+                                                 Just CrWon => ET (-1, grid) []
+                                                 Just Dr => ET (0, grid) []
+                                                 Nothing => let lst = (map (minimax (nextPlayer plr)) xs) in
+                                                                case plr of Cross => ET ((getMax lst), grid) lst
+                                                                            Zero => ET ((getMin lst), grid) lst 
+
+
 
 
 -- trace : (msg : String) -> (result : a) -> a 
@@ -369,7 +375,7 @@ runCmd fuel (InProgress grid frps Zero et) CrossesLost = ok () (CrossL grid)
 runCmd fuel (InProgress grid [] pl et) DrawGame = ok () (JustDraw grid)
 runCmd fuel st@(InProgress grid frps pl et) (Move move) 
   = do let newGrid = addMove grid move pl
-       let newEstimatedTree = if grid == EmptyGrid then minimax (nextPlayer pl) (mkTree (nextPlayer pl) newGrid) 
+       let newEstimatedTree = if grid == EmptyGrid then minimax pl (mkTree (nextPlayer pl) newGrid) 
                                                    else et
        case checkGrid newGrid of Just CrLost => ok Won (InProgress newGrid frps (nextPlayer pl) newEstimatedTree)
                                  Just CrWon =>  ok Won (InProgress newGrid frps (nextPlayer pl) newEstimatedTree)
