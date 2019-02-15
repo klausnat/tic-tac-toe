@@ -1,6 +1,5 @@
 import Data.Vect
 import Debug.Trace
-%default total
 
 data Position = X | O | E
 
@@ -26,7 +25,6 @@ Show Position where
   show E = " "
 
 data Grid : Type where 
-     -- MkGrid : Vect 9 (Int, Position) -> Grid
      MkGrid : List (Int, Position) -> Grid
      
 sp : String
@@ -106,10 +104,10 @@ checkGrid (MkGrid xs) = checkTriple $ makeTriples xs
 ------------------ Minimax below
 -- computer plays for zeroes, human (crosses) go first
 data Tree = T Grid (List Tree)
-data EstimatedTree = ET (Int, Grid) (List EstimatedTree)
+data EstimatedTree = ET (Int, Int, Int, Grid) (List EstimatedTree)
 
 EmptyEstimatedTree : EstimatedTree
-EmptyEstimatedTree = ET (0,EmptyGrid) []
+EmptyEstimatedTree = ET (0,0,0,EmptyGrid) []
 
 partial
 Show Tree where
@@ -118,7 +116,7 @@ Show Tree where
 
 partial 
 Show EstimatedTree where
-  show (ET (estimation,grid) xs) = "EstimatedTree (just node) \n estimation:  " 
+  show (ET (estimation,alpha,beta,grid) xs) = "EstimatedTree (just node) \n estimation:  " 
                                    ++ show estimation ++ "\n" 
                                    ++ "grid: \n" ++ show grid ++ "\n"
                                    ++ "list of furhter trees: " ++ case xs of [] => "empty"
@@ -164,31 +162,57 @@ mkTree player gr@(MkGrid xs)
 
 -- bypass tree function 
 partial
-getMax : (l : List EstimatedTree) -> Int
-getMax ((ET (a, b) ys) :: []) = a
-getMax ((ET (a, b) ys) :: ((ET (c, d) zs) :: xs)) = if a >= c then getMax ((ET (a,b) ys) :: xs) 
-                                                              else getMax ((ET (c,d) ys) :: xs) 
+getMaxAlphaBeta : (l : List EstimatedTree) -> (Int,Int,Int)
+getMaxAlphaBeta ((ET (value,alpha,beta,grid) ys) :: []) = (value,alpha,beta)
+getMaxAlphaBeta ((ET (a,alpha,beta,b) ys) :: ((ET (c,alpha1,beta1,d) zs) :: xs)) = if a >= c then getMaxAlphaBeta ((ET (a,alpha,beta,b) ys) :: xs) 
+                                                                                             else getMaxAlphaBeta ((ET (c,alpha1,beta1,d) ys) :: xs) 
 partial
-getMin : (l : List EstimatedTree) -> Int
-getMin ((ET (a, b) ys) :: []) = a
-getMin ((ET (a, b) ys) :: ((ET (c, d) zs) :: xs)) = if a <= c then getMin ((ET (a,b) ys) :: xs) 
-                                                              else getMin ((ET (c,d) ys) :: xs) 
+getMinAlphaBeta : (l : List EstimatedTree) -> (Int,Int,Int)
+getMinAlphaBeta ((ET (a,alpha,beta, b) ys) :: []) = (a,alpha,beta)
+getMinAlphaBeta ((ET (a,alpha,beta, b) ys) :: ((ET (c,alpha1,beta1, d) zs) :: xs)) = if a <= c then getMinAlphaBeta ((ET (a,alpha,beta,b) ys) :: xs) 
+                                                              else getMinAlphaBeta ((ET (c,alpha1,beta1,d) ys) :: xs) 
+getVal : (Int, Int, Int) -> Int
+getVal (a,b,c) = a
+
+getAlpha : (Int, Int, Int) -> Int
+getAlpha (a,b,c) = b
+
+getBeta : (Int, Int, Int) -> Int
+getBeta (a,b,c) = c
 
 --data Tree = T Grid (List Tree)
---data EstimatedTree = ET (Int, Grid) (List EstimatedTree)
+--                        val,alpha,beta
+--data EstimatedTree = ET (Int,Int,Int,Grid) (List EstimatedTree)
 
-partial
+
+-- maximum and minimum - functions that return triple (maxvalue, unchangedAlpha, unchangedBeta)
 minimax : Player -> Tree -> EstimatedTree
-minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (1, grid) []
-                                                 Just CrWon => ET (-1, grid) []
-                                                 Just Dr => ET (0, grid) []
-                                                 Nothing => ET (0, grid) [] 
-minimax plr (T grid xs) = case checkGrid grid of Just CrLost => ET (1, grid) []
-                                                 Just CrWon => ET (-1, grid) []
-                                                 Just Dr => ET (0, grid) []
-                                                 Nothing => let lst = (map (minimax (nextPlayer plr)) xs) in
-                                                                case plr of Cross => ET ((getMax lst), grid) lst
-                                                                            Zero => ET ((getMin lst), grid) lst 
+minimax plr (T grid []) = case checkGrid grid of Just CrLost => ET (1,1,-1,grid) []
+                                                 Just CrWon => ET (-1,-1,1,grid) []
+                                                 Just Dr => ET (0,0,0,grid) []
+                                                 Nothing => ET (0,0,0,grid) [] 
+minimax plr (T grid xs) = 
+  case checkGrid grid of Just CrLost => ET (1,1,-1,grid) []
+                         Just CrWon => ET (-1,-1,1,grid) []
+                         Just Dr => ET (0,0,0,grid) []
+                         Nothing => let lst = (map (minimax (nextPlayer plr)) xs) 
+                                        maximum = getMaxAlphaBeta lst
+                                        minimum = getMinAlphaBeta lst
+                                        maxVal = getVal maximum
+                                        minVal = getVal minimum
+                                        alpha = getAlpha maximum
+                                        beta = getBeta maximum
+                                        alpha1 = getAlpha minimum 
+                                        beta1 = getBeta minimum in
+                                        case plr of Cross => let newAlpha = max alpha maxVal in
+                                                                 case newAlpha >= beta of 
+                                                                    True => ET (maxVal, newAlpha,beta,grid) lst
+                                                                    False => ET (maxVal, newAlpha,beta,grid) []
+                                                    Zero => let newBeta = min beta1 minVal in
+                                                                case alpha1 >= newBeta of 
+                                                                   True => ET (minVal,alpha1,newBeta,grid) lst
+                                                                   False => ET (minVal,alpha1,newBeta,grid) [] 
+                   
 
 
 
@@ -321,10 +345,10 @@ partial
 -- gets max-estimated grid from the given list, just one, just upper layer.
 getMaxGrid : (lst : List EstimatedTree) -> Maybe Grid
 getMaxGrid [] = Nothing
-getMaxGrid ((ET (int1,gr1) xs1) :: []) = Just gr1
-getMaxGrid ((ET (int2,gr2) xs2) :: ((ET (int3,gr3) xs3) :: rest)) 
-  = if int2 >= int3 then getMaxGrid $ (ET (int2,gr2) xs2) :: rest
-                    else getMaxGrid $ (ET (int3,gr3) xs3) :: rest
+getMaxGrid ((ET (int1,alpha,beta,gr1) xs1) :: []) = Just gr1
+getMaxGrid ((ET (int2,alpha2,beta2,gr2) xs2) :: ((ET (int3,alpha3,beta3,gr3) xs3) :: rest)) 
+  = if int2 >= int3 then getMaxGrid $ (ET (int2,alpha2,beta2,gr2) xs2) :: rest
+                    else getMaxGrid $ (ET (int3,alpha3,beta3,gr3) xs3) :: rest
 
 -- gives move, which is the difference between initial and selected grid
 compareGrds : (initialGrid : Grid) -> (selectedGrid : Grid) -> Maybe Int
@@ -352,8 +376,8 @@ findET (x :: xs) = case x of (Just smth) => Just smth
 
 partial
 findRightNode : Grid -> EstimatedTree -> Maybe EstimatedTree
-findRightNode gr et@(ET (estInt, gr1) []) = if gr == gr1 then Just et else Nothing
-findRightNode gr et@(ET (estInt, gr1) xs) 
+findRightNode gr et@(ET (estInt,alpha,beta,gr1) []) = if gr == gr1 then Just et else Nothing
+findRightNode gr et@(ET (estInt,alpha,beta,gr1) xs) 
   = if gr == gr1 then Just et 
     else let res = map (findRightNode gr) xs in
              findET res 
